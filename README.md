@@ -31,8 +31,10 @@ In the last month or so, I purchased a couple mini-PCs.  One of those became a 4
 
 2) Edit the result.tpl file to suit yourself.  The result.tpl file is the template for the individual entries in your search output.  I've tweaked it for my own use.  You may want to untweak it and/or add your own modifications.  If you want the original version, visit the link for docker-recoll-webui (below).
 
-3) docker run -itd --name recoll -p 8084:80 -p 8083:8080 -v /data/docs:/var/www/html/docs -v /data/recoll:/root/.recoll ghcr.io/jiangchuanso/recoll-webui:v1.0.0
-
+3)
+```
+docker run -itd --name recoll -p 8084:80 -p 8083:8080 -v /data/docs:/var/www/html/docs -v /data/recoll:/root/.recoll ghcr.io/jiangchuanso/recoll-webui
+```
 4) Point a browser at http://localhost:8083.
 
 You can then start/stop the container (without having to re-run the build-image or build scripts) via: 

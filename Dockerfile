@@ -27,7 +27,7 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 # Install Python packages
-RUN pip3 install --no-cache-dir waitress
+RUN pip3 install --no-cache-dir waitress jieba
 
 # Copy application scripts
 COPY recollstatus.py /usr/bin/recollstatus
@@ -39,11 +39,6 @@ COPY recoll.conf /root/.recoll/recoll.conf
 
 # Clone recollwebui
 RUN cd / && git clone https://framagit.org/medoc92/recollwebui.git
-
-# Copy custom template
-COPY result.tpl /recollwebui/views/result.tpl
-RUN chown root: /recollwebui/views/result.tpl && \
-    chmod 644 /recollwebui/views/result.tpl
 
 # Create docs directory and symlink for Apache
 RUN mkdir -p /docs /var/www/html && \

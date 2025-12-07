@@ -1,65 +1,63 @@
-FROM  debian:buster-slim
-MAINTAINER joatd
+FROM ubuntu:22.04
+LABEL maintainer="joatd"
 
-# install important dependencies
+# Prevent interactive prompts during build
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install system dependencies and Recoll from Ubuntu repository
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-	antiword \
-	apache2 \
-	git \
-	libxml2 \
-	net-tools \
-	poppler-utils \
-	python3 \
-	python3-chm \
-	python3-libxml2 \
-	python-libxslt1 \
-	python3-lxml \
-	python3-pip \
-	unrtf \
+        antiword \
+        apache2 \
+        git \
+        libxml2 \
+        net-tools \
+        poppler-utils \
+        python3 \
+        python3-pip \
+        python3-libxml2 \
+        python3-lxml \
+        python3-chm \
+        unrtf \
         unzip \
-	vim 
-RUN pip3 install waitress
+        vim \
+        recoll \
+        python3-recoll && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
-# install recollcmd from recolls programmers website
-RUN apt-get install -y --no-install-recommends gnupg
-COPY recoll.gpg  /root/recoll.gpg
-RUN gpg --import  /root/recoll.gpg
-RUN gpg --export '7808CE96D38B9201' | apt-key add -
-RUN apt-get install --reinstall -y ca-certificates
-RUN apt-get update
-RUN echo deb http://www.lesbonscomptes.com/recoll/debian/ buster main > \
-        /etc/apt/sources.list.d/recoll.list
-RUN echo deb-src http://www.lesbonscomptes.com/recoll/debian/ buster main >> \
-        /etc/apt/sources.list.d/recoll.list
-RUN apt-get install -y --no-install-recommends recollcmd python3-recoll
-RUN apt-get autoremove
+# Install Python packages
+RUN pip3 install --no-cache-dir waitress
 
-# clean up
-RUN apt-get clean
-
+# Copy application scripts
 COPY recollstatus.py /usr/bin/recollstatus
 RUN chmod a+x /usr/bin/recollstatus
 
-#RUN mkdir /docs && mkdir /root/.recoll
-RUN mkdir /root/.recoll
+# Create Recoll configuration directory
+RUN mkdir -p /root/.recoll
 COPY recoll.conf /root/.recoll/recoll.conf
 
+# Clone recollwebui
 RUN cd / && git clone https://framagit.org/medoc92/recollwebui.git
 
+# Copy custom template
 COPY result.tpl /recollwebui/views/result.tpl
-RUN chown root: /recollwebui/views/result.tpl
-RUN chmod 644 /recollwebui/views/result.tpl
+RUN chown root: /recollwebui/views/result.tpl && \
+    chmod 644 /recollwebui/views/result.tpl
 
-RUN ln -s /docs /var/www/html/docs
+# Create docs directory and symlink for Apache
+RUN mkdir -p /docs /var/www/html && \
+    ln -sf /docs /var/www/html/docs
 
+# Copy and prepare startup script
 COPY startup.sh /startup.sh
-RUN chmod a+x startup.sh
+RUN chmod a+x /startup.sh
 
-VOLUME /var/www/html/docs
-VOLUME /root/.recoll
-EXPOSE 80
-EXPOSE 8080
+# Define volumes
+VOLUME ["/docs", "/root/.recoll"]
 
-#CMD ["/usr/bin/python3", "/recollwebui/webui-standalone.py", "-a", "0.0.0.0"]
+# Expose ports
+EXPOSE 80 8080
+
+# Default command
 CMD ["/startup.sh"]

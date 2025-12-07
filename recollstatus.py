@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 from __future__ import print_function
 import errno
@@ -8,7 +8,8 @@ import datetime
 import collections
 import argparse
 import logging
-
+import sys
+logger = logging.getLogger(__name__)
 
 def recollindex_running(pid_filepath):
     # Example PID file path: ~/.recoll/index.pid
@@ -16,23 +17,30 @@ def recollindex_running(pid_filepath):
         pid_file = open(pid_filepath)
     except IOError as e:
         if e.errno == 2:
-            logging.error(
+            logger.error(
                 "Could not find 'index.pid' at '{}'\n".format(pid_filepath))
         else:
-            logging.error(
+            logger.error(
                 "Could not open 'index.pid' at '{}'\n".format(pid_filepath))
         raise
 
-    recoll_pid_string = pid_file.read()
+    try :
+        recoll_pid_string = pid_file.read()
+    except Exception as e:
+        logger.error(
+            "Could not read 'index.pid' at '{}'\n".format(pid_filepath))
+        raise
+
+    logger.debug("recoll_pid_string = '{}'".format(recoll_pid_string))
     if recoll_pid_string == "":
         return False
 
     try:
         recoll_pid = int(recoll_pid_string)
     except ValueError:
-        logging.error("Not a valid process ID: {}\n".format(recoll_pid_string))
+        logger.error("Not a valid process ID: {}".format(recoll_pid_string))
         raise
-    logging.info("recoll_pid = '{}'".format(recoll_pid))
+    logger.info("recoll_pid = '{}'".format(recoll_pid))
 
     # TODO: split this into a separate function and handle things more cleanly.
     # https://stackoverflow.com/questions/568271/how-to-check-if-there-exists-a-process-with-a-given-pid-in-python
@@ -41,18 +49,19 @@ def recollindex_running(pid_filepath):
     try:
         os.kill(recoll_pid, 0)
     except OSError as e:
+        logger.debug("e.errno = '{}'".format(e.errno))
         if e.errno == errno.ESRCH:
-            logging.warning(
-                "'{}' has process ID '{}', but no process with that ID is running.\n".
+            logger.warning(
+                "'{}' has process ID '{}', but no process with that ID is running.".
                 format(pid_filepath, recoll_pid))
             return False
         elif e.errno == errno.EPERM:
-            logging.warning(
-                "'{}' has process ID '{}', but that process is running under a different user.\n".
+            logger.warning(
+                "'{}' has process ID '{}', but that process is running under a different user.".
                 format(pid_filepath, recoll_pid))
             return True
         else:
-            logging.error("sent signal to PID: '{}'".format(recoll_pid))
+            logger.error("sent signal to PID: '{}'".format(recoll_pid))
             raise
 
     return True
@@ -100,7 +109,7 @@ def write_tempfile(fp, prefix):
     import tempfile
 
     temp = tempfile.NamedTemporaryFile(prefix=prefix, delete=False)
-    logging.info("Copying {} to {}\n".format(fp.name, temp.name))
+    logger.info("Copying {} to {}\n".format(fp.name, temp.name))
     fp.seek(0)
     temp.file.write(fp.read())
     temp.close()
@@ -110,7 +119,7 @@ def write_tempfile_text(text, prefix):
     import tempfile
 
     temp = tempfile.NamedTemporaryFile(prefix=prefix, delete=False)
-    logging.info("Copying to {}\n".format(temp.name))
+    logger.info("Copying to {}\n".format(temp.name))
     temp.file.write(text)
     temp.close()
 
@@ -120,7 +129,7 @@ def parse_idxstatus(idxstatus_fp, write_tempfiles=True):
 
     text = idxstatus_fp.read()
     if text == "":
-        logging.warning("idxstatus file is blank")
+        logger.warning("idxstatus file is blank")
         return idxstatus
 
     text_wrapped = text.replace("\\\n", "")
@@ -128,7 +137,7 @@ def parse_idxstatus(idxstatus_fp, write_tempfiles=True):
         try:
             key, val = (x.strip() for x in line.split("=", 1))
         except ValueError:
-            logging.error("Cannot parse line: {}\n".format(line))
+            logger.error("Cannot parse line: {}\n".format(line))
             if write_tempfiles:
                 # If the parsing the idxstatus file fails,
                 # keep a copy of it for later debugging.
@@ -153,7 +162,8 @@ def parse_idxstatus(idxstatus_fp, write_tempfiles=True):
 
 
 def format_idxstatus(idxstatus):
-    DbIxStatus = {
+    # TODO: should this even be included, since it can change with each version?
+    DbIxStatus_before_v1p30p1 = {
         "0": "DBIXS_NONE",
         "1": "DBIXS_FILES",
         "2": "DBIXS_PURGE",
@@ -162,15 +172,41 @@ def format_idxstatus(idxstatus):
         "5": "DBIXS_MONITOR",
         "6": "DBIXS_DONE",
     }
-    if "phase" in idxstatus:
-        formatted = [
-            "DbIxStatus is {}: {}".format(idxstatus["phase"],
-                                          DbIxStatus[idxstatus["phase"]])
-        ]
-    else:
+    DbIxStatus = {
+        "0": "DBIXS_NONE",
+        "1": "DBIXS_FILES",
+        "2": "DBIXS_FLUSH",
+        "3": "DBIXS_PURGE",
+        "4": "DBIXS_STEMDB",
+        "5": "DBIXS_CLOSING",
+        "6": "DBIXS_MONITOR",
+        "7": "DBIXS_DONE",
+    }
+    try:
+        phase_number = idxstatus["phase"]
+        try:
+            phase_name = DbIxStatus[phase_number]
+            try:
+                phase_name_old = DbIxStatus_before_v1p30p1[phase_number]
+            except Exception as e:
+                logging.warning("Exception: {}".format(e))
+                phase_name_old = None
+
+            if phase_name == phase_name_old:
+                formatted = [
+                    "DbIxStatus is {} ({})".format(phase_number, phase_name)
+                ]
+            else:
+                formatted = [
+                    "DbIxStatus is {} ({} or {} for version 1.31.0 and earlier)".format(phase_number, phase_name, phase_name_old)
+                ]
+        except KeyError:
+            formatted = [
+                "DbIxStatus is {} (unknown phase)".format(phase_number)
+            ]
+    except KeyError:
         formatted = []
-    # https://bitbucket.org/medoc/recoll/src/dabc5bae1dd7f8b5049ef021c441ffb8050cd7eb/src/index/indexer.h?at=default&fileviewer=file-view-default#indexer.h-40
-    # https://opensourceprojects.eu/p/recoll1/code/ci/85a3291fd71fb0fae225f836b684d8b462567422/tree/src/index/
+    # https://framagit.org/medoc92/recoll/-/blob/9d3869c2b954fb8e90cd7f0b1465fe358dbc49c3/src/index/idxstatus.h#L27
     descriptors = collections.OrderedDict()
     descriptors["docsdone"] = "Documents updated:                    "
     descriptors["filesdone"] = "Files tested:                         "
@@ -191,24 +227,33 @@ def format_idxstatus(idxstatus):
     return "\n".join(formatted)
 
 
-def recollstatus(recoll_dir, verbose=False):
+def recollstatus(recoll_dir, dbdir=None):
     status = []
-    if recollindex_running(os.path.join(recoll_dir, "index.pid")):
-        status.append("recollindex is running")
-        recollindex_start, then = last_started(
-            os.path.join(recoll_dir, "xapiandb", "flintlock"))
+    try :
+        is_running = recollindex_running(os.path.join(recoll_dir, "index.pid"))
+    except Exception as e :
+        print(e, file=sys.stderr)
+        is_running = None
+
+    if dbdir is None:
+        flintlock_path = os.path.join(recoll_dir, "xapiandb", "flintlock")
+    else:
+        flintlock_path = os.path.join(dbdir, "flintlock")
+    logging.info("flintlock_path = '{}'".format(flintlock_path))
+
+    if is_running is None:
+        status.append("not sure if recollindex is running or not")
+    elif is_running:
+        status.append("index.pid matches running process")
+        recollindex_start, then = last_started(flintlock_path)
         recollindex_elapsed_time = then - recollindex_start
         status.append(" recollindex was last started on: {}".format(
             recollindex_start.ctime()))
         status.append(" recollindex has been running for: {}".format(
             recollindex_elapsed_time))
-        idxstatus_path = os.path.join(recoll_dir, "idxstatus.txt")
-        with open(idxstatus_path) as idxstatus_fp:
-            status.append(format_idxstatus(parse_idxstatus(idxstatus_fp)))
     else:
-        status.append("recollindex is not running")
-        recollindex_start, then = last_started(
-            os.path.join(recoll_dir, "xapiandb", "flintlock"))
+        status.append("index.pid does not match a running process")
+        recollindex_start, then = last_started(flintlock_path)
         time_since_last_started = then - recollindex_start
         recollindex_last_active, then = since_last_active(
             os.path.join(recoll_dir, "idxstatus.txt"))
@@ -221,10 +266,10 @@ def recollstatus(recoll_dir, verbose=False):
             time_since_last_started))
         status.append(" time since recollindex last active:  {}".format(
             time_since_last_index))
-        if verbose:
-            idxstatus_path = os.path.join(recoll_dir, "idxstatus.txt")
-            with open(idxstatus_path) as idxstatus_fp:
-                status.append(format_idxstatus(parse_idxstatus(idxstatus_fp)))
+
+    idxstatus_path = os.path.join(recoll_dir, "idxstatus.txt")
+    with open(idxstatus_path) as idxstatus_fp:
+        status.append(format_idxstatus(parse_idxstatus(idxstatus_fp)))
 
     date_of_last_query, date_now = latest_query(
         os.path.join(recoll_dir, "history"))
@@ -247,16 +292,62 @@ def readable_directory(path):
             "not a readable directory: {}".format(path))
     return path
 
+def get_default_recoll_dir():
+    """
+    "This configuration is the one used for indexing and querying when no
+    specific configuration is specified. It is located in ``$HOME/.recoll/``
+    for **Unix**-like systems and ``%LOCALAPPDATA%\\Recoll`` on **Windows**
+    (typically ``C:\\Users\\[me]\\Appdata\\Local\\Recoll``)."
+    <https://www.lesbonscomptes.com/recoll/usermanual/usermanual.html>
+    """
+    try:
+        HOME = os.environ['HOME']
+        logger.debug("HOME = '{}'".format(HOME))
+    except KeyError:
+        HOME = None
 
-if __name__ == "__main__":
+    if HOME is not None:
+        unix_path = os.path.join(HOME, '.recoll')
+        logger.debug("looking for Unix path: '{}'".format(unix_path))
+        if os.path.exists(unix_path):
+            logger.debug("Unix path exists: '{}'".format(unix_path))
+            return unix_path
+        else:
+            logger.debug("Unix path does not exist: '{}'".format(unix_path))
+
+    try :
+        LOCALAPPDATA = os.environ['LOCALAPPDATA']
+        logger.debug("LOCALAPPDATA = '{}'".format(HOME))
+    except KeyError:
+        LOCALAPPDATA = None
+
+    if LOCALAPPDATA is not None:
+        windows_path = os.path.join(LOCALAPPDATA, 'Recoll')
+        logger.debug("looking for Windows path: '{}'".format(windows_path))
+        if os.path.exists(windows_path):
+            logger.debug("Windows path exists: '{}'".format(windows_path))
+            return windows_path
+        else:
+            logger.debug("Windows path does not exist: '{}'".format(windows_path))
+
+    raise FileNotFoundError("Could not find recoll directory in default location.")
+
+
+def main():
     parser = argparse.ArgumentParser(
         description="Display status of recollindex.")
     parser.add_argument(
         "-d",
         "--recoll-dir",
         type=readable_directory,
-        default=os.path.expanduser("~/.recoll"),
+        default=None,
         help="Recoll directory",
+    )
+    parser.add_argument(
+        "--dbdir",
+        type=readable_directory,
+        default=None,
+        help="Xapian database directory",
     )
     parser.add_argument(
         "-v",
@@ -276,17 +367,26 @@ if __name__ == "__main__":
         const=logging.DEBUG,
     )
     args = parser.parse_args()
+    # Initialize to avoid this error:
+    # "No handlers could be found for logger"
     logging.basicConfig(level=args.loglevel)
+    logger.setLevel(args.loglevel)
+
+    # Need to do this after logger is set up.
+    if args.recoll_dir is None:
+        recoll_dir = get_default_recoll_dir()
+    else:
+        recoll_dir = args.recoll_dir
 
     try:
         if shutil.which("recoll") is None:
-            logging.warning(
+            logger.warning(
                 "Could not find 'recoll' executable. Is recoll installed?\n")
     except AttributeError:
         # shutil.which() is only in python 3.3 and later.
         pass
 
-    if args.loglevel <= logging.INFO:
-        print(recollstatus(args.recoll_dir, verbose=True))
-    else:
-        print(recollstatus(args.recoll_dir, verbose=False))
+    print(recollstatus(recoll_dir, dbdir=args.dbdir))
+
+if __name__ == "__main__":
+    main()

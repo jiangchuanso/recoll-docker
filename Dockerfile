@@ -11,7 +11,6 @@ RUN apt-get update && \
         apache2 \
         aspell \
         aspell-en \
-        aspell-zh \
         file \
         git \
         libxml2 \

@@ -9,6 +9,10 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         antiword \
         apache2 \
+        aspell \
+        aspell-en \
+        aspell-zh \
+        file \
         git \
         libxml2 \
         net-tools \
@@ -38,7 +42,7 @@ RUN mkdir -p /root/.recoll
 COPY recoll.conf /root/.recoll/recoll.conf
 
 # Clone recollwebui
-RUN cd / && git clone https://framagit.org/medoc92/recollwebui.git
+RUN cd / && git clone https://framagit.org/medoc92/recollwebui.git 
 
 # Create docs directory and symlink for Apache
 RUN mkdir -p /docs /var/www/html && \

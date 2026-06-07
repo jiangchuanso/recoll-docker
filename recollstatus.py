@@ -14,7 +14,8 @@ logger = logging.getLogger(__name__)
 def recollindex_running(pid_filepath):
     # Example PID file path: ~/.recoll/index.pid
     try:
-        pid_file = open(pid_filepath)
+        with open(pid_filepath) as pid_file:
+            recoll_pid_string = pid_file.read()
     except IOError as e:
         if e.errno == 2:
             logger.error(
@@ -22,13 +23,6 @@ def recollindex_running(pid_filepath):
         else:
             logger.error(
                 "Could not open 'index.pid' at '{}'\n".format(pid_filepath))
-        raise
-
-    try :
-        recoll_pid_string = pid_file.read()
-    except Exception as e:
-        logger.error(
-            "Could not read 'index.pid' at '{}'\n".format(pid_filepath))
         raise
 
     logger.debug("recoll_pid_string = '{}'".format(recoll_pid_string))
@@ -80,29 +74,30 @@ def latest_query(history_path):
 
 
 def last_started(flintlock_path):
-    flintflock_timestamp = os.path.getmtime(flintlock_path)
-    now = datetime.datetime.now()
-    date_recollindex_started = datetime.datetime.fromtimestamp(
-        flintflock_timestamp)
-    return date_recollindex_started, now
-
-
-def since_last_started(flintlock_path):
-    # Files that should also work:
-    # ~/.recoll/index.pid
-    timestamp = os.path.getmtime(flintlock_path)
-    now = datetime.datetime.now()
-    date_recollindex_last_started = datetime.datetime.fromtimestamp(timestamp)
-    return date_recollindex_last_started, now
+    try:
+        flintflock_timestamp = os.path.getmtime(flintlock_path)
+        now = datetime.datetime.now()
+        date_recollindex_started = datetime.datetime.fromtimestamp(
+            flintflock_timestamp)
+        return date_recollindex_started, now
+    except OSError as e:
+        logger.error("Could not get modification time of '{}': {}".format(flintlock_path, e))
+        raise
 
 
 def since_last_active(idxstatus_path):
+    now = datetime.datetime.now()
     if os.path.isfile(idxstatus_path):
-        idxstatus_timestamp = os.path.getmtime(idxstatus_path)
-        now = datetime.datetime.now()
-        date_recollindex_last_active = datetime.datetime.fromtimestamp(
-            idxstatus_timestamp)
-    return date_recollindex_last_active, now
+        try:
+            idxstatus_timestamp = os.path.getmtime(idxstatus_path)
+            date_recollindex_last_active = datetime.datetime.fromtimestamp(
+                idxstatus_timestamp)
+            return date_recollindex_last_active, now
+        except OSError as e:
+            logger.error("Could not get modification time of '{}': {}".format(idxstatus_path, e))
+            raise
+    else:
+        return None, now
 
 
 def write_tempfile(fp, prefix):
@@ -254,22 +249,33 @@ def recollstatus(recoll_dir, dbdir=None):
     else:
         status.append("index.pid does not match a running process")
         recollindex_start, then = last_started(flintlock_path)
-        time_since_last_started = then - recollindex_start
+        elapsed_since_start = then - recollindex_start
         recollindex_last_active, then = since_last_active(
             os.path.join(recoll_dir, "idxstatus.txt"))
-        time_since_last_index = then - recollindex_last_active
-        status.append(" recollindex was last started on: {}".format(
-            recollindex_start.ctime()))
-        status.append(" recollindex was last active on:  {}".format(
-            recollindex_last_active.ctime()))
-        status.append(" time since recollindex last started: {}".format(
-            time_since_last_started))
-        status.append(" time since recollindex last active:  {}".format(
-            time_since_last_index))
+        if recollindex_last_active is not None:
+            time_since_last_index = then - recollindex_last_active
+            status.append(" recollindex was last started on: {}".format(
+                recollindex_start.ctime()))
+            status.append(" recollindex was last active on:  {}".format(
+                recollindex_last_active.ctime()))
+            status.append(" time since recollindex last started: {}".format(
+                elapsed_since_start))
+            status.append(" time since recollindex last active:  {}".format(
+                time_since_last_index))
+        else:
+            status.append(" recollindex was last started on: {}".format(
+                recollindex_start.ctime()))
+            status.append(" time since recollindex last started: {}".format(
+                elapsed_since_start))
+            status.append(" Could not determine last active time (idxstatus.txt not found)")
 
     idxstatus_path = os.path.join(recoll_dir, "idxstatus.txt")
-    with open(idxstatus_path) as idxstatus_fp:
-        status.append(format_idxstatus(parse_idxstatus(idxstatus_fp)))
+    try:
+        with open(idxstatus_path) as idxstatus_fp:
+            status.append(format_idxstatus(parse_idxstatus(idxstatus_fp)))
+    except IOError as e:
+        logger.error("Could not open 'idxstatus.txt' at '{}': {}".format(idxstatus_path, e))
+        status.append("Could not read index status information.")
 
     date_of_last_query, date_now = latest_query(
         os.path.join(recoll_dir, "history"))
@@ -317,7 +323,7 @@ def get_default_recoll_dir():
 
     try :
         LOCALAPPDATA = os.environ['LOCALAPPDATA']
-        logger.debug("LOCALAPPDATA = '{}'".format(HOME))
+        logger.debug("LOCALAPPDATA = '{}'".format(LOCALAPPDATA))
     except KeyError:
         LOCALAPPDATA = None
 
